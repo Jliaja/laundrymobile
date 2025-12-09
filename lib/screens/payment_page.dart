@@ -1,7 +1,10 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:midtrans_sdk/midtrans_sdk.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:laundry_mobile/config.dart';
+import 'package:flutter/scheduler.dart';
 
 class PaymentPage extends StatefulWidget {
   final int pesananId;
@@ -12,101 +15,109 @@ class PaymentPage extends StatefulWidget {
 }
 
 class _PaymentPageState extends State<PaymentPage> {
-  late MidtransSDK _midtrans;
-  bool _isLoading = true;
-  String? _snapToken;
-  String _status = "Menyiapkan transaksi...";
+  bool loading = true;
+  String status = "Menyiapkan pembayaran...";
+  String? payUrl;
 
   @override
   void initState() {
     super.initState();
-    _initMidtrans();
+    createTransaction();
   }
 
-  Future<void> _initMidtrans() async {
-    _midtrans = await MidtransSDK.init(
-      config: MidtransConfig(
-        clientKey:
-            "SB-Mid-client-xxxxx", // Ganti dengan client key sandbox kamu
-        merchantBaseUrl: "http://192.168.1.2:8000/api/",
-      ),
+  Future<void> createTransaction() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('token') ?? '';
+
+    print("=== MIDTRANS DEBUG ===");
+    print("URL: ${Config.baseUrl}/api/payment/create-transaction");
+    print("Pesanan ID: ${widget.pesananId}");
+    print("Token: $token");
+
+    final response = await http.post(
+      Uri.parse('${Config.baseUrl}/api/payment/create-transaction'),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({'pesanan_id': widget.pesananId}),
     );
 
-    _midtrans.setTransactionFinishedCallback((result) {
-      final status = result.status?.toLowerCase() ?? '';
+    print("STATUS CODE: ${response.statusCode}");
+    print("RESPONSE: ${response.body}");
 
-      print('DEBUG: Hasil transaksi -> $status'); // buat debugging di console
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
 
-      if (status == 'settlement' || status == 'capture') {
-        setState(() => _status = "Pembayaran berhasil ✅");
-      } else if (status == 'pending') {
-        setState(() => _status = "Menunggu pembayaran ⏳");
-      } else if (status == 'cancel') {
-        setState(() => _status = "Dibatalkan pengguna 🚫");
-      } else if (status == 'failure') {
-        setState(() => _status = "Pembayaran gagal ❌");
-      } else {
-        setState(() => _status = "Status tidak diketahui ⚠️ ($status)");
-      }
-    });
+      // Backend mengirim: token & redirect_url
+      final redirectUrl = data['redirect_url'];
 
-    await _createTransaction();
-  }
-
-  Future<void> _createTransaction() async {
-    try {
-      final response = await http.post(
-        Uri.parse('http://192.168.1.2:8000/api/create-transaction'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'pesanan_id': widget.pesananId}),
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final token = data['snap_token'];
-
+      if (redirectUrl == null) {
         setState(() {
-          _snapToken = token;
-          _isLoading = false;
+          status = "redirect_url tidak ditemukan.";
+          loading = false;
         });
-
-        _startPayment(token);
-      } else {
-        setState(() => _status = 'Gagal membuat transaksi');
+        return;
       }
-    } catch (e) {
-      setState(() => _status = 'Error: $e');
+
+      // Simpan url final ke payUrl
+      payUrl = redirectUrl;
+
+      setState(() {
+        status = "Transaksi siap. Tekan Bayar.";
+        loading = false;
+      });
+    } else {
+      setState(() {
+        status = "Gagal membuat transaksi.";
+        loading = false;
+      });
     }
+  } catch (e) {
+    setState(() {
+      status = "Error: $e";
+      loading = false;
+    });
   }
+}
 
-  Future<void> _startPayment(String token) async {
-    await _midtrans.startPaymentUiFlow(token: token);
-  }
 
-  @override
-  void dispose() {
-    _midtrans.removeTransactionFinishedCallback();
-    super.dispose();
-  }
+  Future<void> openPayment() async {
+  if (payUrl == null) return;
+
+  final uri = Uri.parse(payUrl!);
+
+  // Buka browser ke Midtrans
+  await launchUrl(uri, mode: LaunchMode.externalApplication);
+
+  // Setelah user balik lagi ke aplikasi → langsung kembali ke daftar pesanan
+  SchedulerBinding.instance.addPostFrameCallback((_) {
+    Navigator.pop(context, true);
+  });
+}
+
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Pembayaran Midtrans")),
+      appBar: AppBar(title: const Text("Pembayaran")),
       body: Center(
-        child: _isLoading
+        child: loading
             ? const CircularProgressIndicator()
             : Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(_status, textAlign: TextAlign.center),
+                  Text(
+                    status,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 16),
+                  ),
                   const SizedBox(height: 20),
                   ElevatedButton(
-                    onPressed: _snapToken == null
-                        ? null
-                        : () => _startPayment(_snapToken!),
+                    onPressed: payUrl == null ? null : openPayment,
                     child: const Text("Bayar Sekarang"),
-                  ),
+                  )
                 ],
               ),
       ),

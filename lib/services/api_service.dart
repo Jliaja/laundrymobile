@@ -1,8 +1,11 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:laundry_mobile/config.dart';
+
 
 class ApiService {
-  static const String baseUrl = "http://192.168.1.2:8000/api"; // IP laptop kamu
+  static const String baseUrl =
+      "${Config.baseUrl}/api"; // IP laptop kamu
 
   Future<Map<String, dynamic>> login(String username, String password) async {
     try {

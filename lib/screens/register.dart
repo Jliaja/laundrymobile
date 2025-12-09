@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:laundry_mobile/config.dart';
+import 'verifikasiotp.dart'; // pastikan file ini ada
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -16,7 +18,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final TextEditingController _password = TextEditingController();
   final TextEditingController _confirmPassword = TextEditingController();
   final TextEditingController _address = TextEditingController();
-  final TextEditingController _verifikasiKode = TextEditingController();
 
   bool _isLoading = false;
   String? _errorMessage;
@@ -27,6 +28,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Future<void> _register() async {
     if (!_formKey.currentState!.validate()) return;
 
+    if (_password.text != _confirmPassword.text) {
+      setState(() => _errorMessage = 'Password dan konfirmasi tidak cocok');
+      return;
+    }
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -34,29 +40,37 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.1.2:8000/api/register'),
+        Uri.parse('${Config.baseUrl}/api/account/register'),
         headers: {'Accept': 'application/json'},
         body: {
-          'username': _username.text,
-          'email': _email.text,
-          'password': _password.text,
-          'confirm_password': _confirmPassword.text,
-          'address': _address.text,
-          'verifikasi_kode': _verifikasiKode.text,
+          'username': _username.text.trim(),
+          'email': _email.text.trim(),
+          'password': _password.text.trim(),
+          'confirm_password': _confirmPassword.text.trim(),
+          'address': _address.text.trim(),
         },
       );
 
-      final data = json.decode(response.body);
+      final data = jsonDecode(response.body);
 
-      if (response.statusCode == 200 && data['success'] == true) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(data['message'] ?? 'Registrasi berhasil!')),
+      if ((response.statusCode == 201 || response.statusCode == 200) && data['success'] == true) {
+        // Berhasil registrasi → langsung ke verifikasi OTP
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => VerifikasiOtpScreen(
+              email: _email.text.trim(),
+              purpose: 'register',
+              onVerified: () {
+                // setelah OTP verified, kembali ke login
+                Navigator.pop(context);
+              },
+            ),
+          ),
         );
-        Navigator.pop(context);
       } else {
         setState(() {
-          _errorMessage =
-              data['message'] ?? 'Registrasi gagal, periksa kembali data kamu.';
+          _errorMessage = data['message'] ?? 'Registrasi gagal, periksa kembali data kamu.';
         });
       }
     } catch (e) {
@@ -64,9 +78,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _errorMessage = 'Terjadi kesalahan: $e';
       });
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      setState(() => _isLoading = false);
     }
   }
 
@@ -77,7 +89,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _password.dispose();
     _confirmPassword.dispose();
     _address.dispose();
-    _verifikasiKode.dispose();
     super.dispose();
   }
 
@@ -118,22 +129,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     Image.asset(
                       'assets/washing_machine.png',
                       height: 80,
-                      errorBuilder: (context, error, stackTrace) => Icon(
-                        Icons.local_laundry_service,
-                        size: 80,
-                        color: waveColor,
-                      ),
+                      errorBuilder: (context, error, stackTrace) =>
+                          Icon(Icons.local_laundry_service, size: 80, color: waveColor),
                     ),
                     const SizedBox(height: 30),
                     Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
                         'Register',
-                        style: TextStyle(
-                          fontSize: 32,
-                          fontWeight: FontWeight.w500,
-                          color: waveColor,
-                        ),
+                        style: TextStyle(fontSize: 32, fontWeight: FontWeight.w500, color: waveColor),
                       ),
                     ),
                     const SizedBox(height: 20),
@@ -152,40 +156,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                       child: Column(
                         children: [
-                          _buildTextField(
-                            controller: _username,
-                            label: "Username",
-                            icon: Icons.person_outline,
-                          ),
-                          _buildTextField(
-                            controller: _email,
-                            label: "Email",
-                            icon: Icons.email_outlined,
-                            keyboardType: TextInputType.emailAddress,
-                          ),
-                          _buildTextField(
-                            controller: _password,
-                            label: "Password",
-                            icon: Icons.lock_outline,
-                            isPassword: true,
-                          ),
-                          _buildTextField(
-                            controller: _confirmPassword,
-                            label: "Konfirmasi Password",
-                            icon: Icons.lock_outline,
-                            isPassword: true,
-                          ),
-                          _buildTextField(
-                            controller: _address,
-                            label: "Alamat",
-                            icon: Icons.home_outlined,
-                          ),
-                          _buildTextField(
-                            controller: _verifikasiKode,
-                            label: "Kode Verifikasi",
-                            icon: Icons.verified_outlined,
-                            keyboardType: TextInputType.number,
-                          ),
+                          _buildTextField(controller: _username, label: "Username", icon: Icons.person_outline),
+                          _buildTextField(controller: _email, label: "Email", icon: Icons.email_outlined, keyboardType: TextInputType.emailAddress),
+                          _buildTextField(controller: _password, label: "Password", icon: Icons.lock_outline, isPassword: true),
+                          _buildTextField(controller: _confirmPassword, label: "Konfirmasi Password", icon: Icons.lock_outline, isPassword: true),
+                          _buildTextField(controller: _address, label: "Alamat", icon: Icons.home_outlined),
                           const SizedBox(height: 20),
                           _isLoading
                               ? CircularProgressIndicator(color: primaryColor)
@@ -193,29 +168,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                   onPressed: _register,
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: primaryColor,
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 80,
-                                      vertical: 15,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(30),
-                                    ),
+                                    padding: const EdgeInsets.symmetric(horizontal: 80, vertical: 15),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
                                   ),
-                                  child: const Text(
-                                    'Daftar Sekarang',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
+                                  child: const Text('Daftar Sekarang', style: TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.bold)),
                                 ),
                           if (_errorMessage != null) ...[
                             const SizedBox(height: 10),
-                            Text(
-                              _errorMessage!,
-                              style: const TextStyle(color: Colors.red),
-                            ),
+                            Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
                           ],
                         ],
                       ),
@@ -250,10 +210,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           prefixIcon: Icon(icon, color: primaryColor.withOpacity(0.7)),
           filled: true,
           fillColor: Colors.white,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 15,
-            vertical: 12,
-          ),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(10),
             borderSide: BorderSide(color: primaryColor.withOpacity(0.3)),

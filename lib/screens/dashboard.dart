@@ -2,296 +2,395 @@ import 'package:flutter/material.dart';
 import 'profile.dart';
 import 'order.dart';
 import 'order_list_page.dart';
-import 'confirmorder.dart';
 import 'login_screen.dart';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
+import 'package:laundry_mobile/config.dart';
 
-class DashboardScreen extends StatelessWidget {
-  final String username;
-  const DashboardScreen({super.key, required this.username});
+class DashboardScreen extends StatefulWidget {
+  const DashboardScreen({super.key});
+
+  @override
+  State<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends State<DashboardScreen> {
+  // ========================= USER DATA =========================
+  String username = "";
+  String? profileImageUrl;
+  bool loadingUser = true;
+
+  // ========================= HARGA DATA =========================
+  List<dynamic> _hargaList = [];
+  bool _loadingHarga = true;
+
+  @override
+  void initState() {
+    super.initState();
+    fetchProfile();
+    _fetchHarga();
+  }
+
+  // ========================= FETCH USER PROFILE =========================
+  Future<void> fetchProfile() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString("token");
+
+      final res = await http.get(
+        Uri.parse("${Config.baseUrl}/api/user/profile"),
+        headers: {
+          "Accept": "application/json",
+          "Authorization": "Bearer $token",
+        },
+      );
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        setState(() {
+          username = data["username"] ?? "";
+          profileImageUrl =
+              "${data["profile_picture"]}?v=${DateTime.now().millisecondsSinceEpoch}";
+          loadingUser = false;
+        });
+      } else {
+        setState(() => loadingUser = false);
+      }
+    } catch (e) {
+      setState(() => loadingUser = false);
+    }
+  }
+
+  // ========================= FETCH HARGA =========================
+  Future<void> _fetchHarga() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+final token = prefs.getString("token");
+
+final response = await http.get(
+  Uri.parse('${Config.baseUrl}/api/harga'),
+  headers: {
+    "Accept": "application/json",
+    "Authorization": "Bearer $token",
+  },
+
+    );
+
+    if (response.statusCode == 200) {
+      setState(() {
+        _hargaList = json.decode(response.body);
+        _loadingHarga = false;
+      });
+    } else {
+      setState(() => _loadingHarga = false);
+    }
+  } catch (e) {
+    print("ERROR: $e");
+    setState(() => _loadingHarga = false);
+  }
+}
+
+
+  // ========================= AUTO REFRESH PROFILE =========================
+  Future<void> _openProfilePage() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const ProfilePage()),
+    );
+
+    // 🔥 Jika ProfilePage mengembalikan true, refresh profile
+    if (result == true) {
+      setState(() {
+        loadingUser = true;
+      });
+      fetchProfile();
+    }
+  }
+
+  // ========================= MANUAL REFRESH =========================
+  Future<void> _refreshAll() async {
+    setState(() {
+      loadingUser = true;
+      _loadingHarga = true;
+    });
+    await Future.wait([
+      fetchProfile(),
+      _fetchHarga(),
+    ]);
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF2F7FA),
-      extendBodyBehindAppBar: true,
+      backgroundColor: const Color(0xFFF6FAFF),
+      drawer: _buildDrawer(context),
       appBar: AppBar(
         title: const Text("Dashboard"),
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
+        foregroundColor: Colors.black87,
       ),
-      drawer: _buildCustomDrawer(context),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        child: RefreshIndicator(
+          onRefresh: _refreshAll,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildWelcomeCard(),
+                const SizedBox(height: 25),
+                _buildMenuRow(context),
+                const SizedBox(height: 35),
+                const Text(
+                  "💰 Daftar Harga Layanan",
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
+                _loadingHarga
+                    ? const Center(child: CircularProgressIndicator())
+                    : _hargaList.isEmpty
+                        ? const Text("Belum ada data harga.")
+                        : Column(
+                            children: _hargaList.map((harga) {
+                              return AnimatedContainer(
+                                duration: const Duration(milliseconds: 300),
+                                margin: const EdgeInsets.symmetric(vertical: 6),
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(14),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.05),
+                                      blurRadius: 6,
+                                      offset: const Offset(0, 3),
+                                    ),
+                                  ],
+                                ),
+                                child: Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(8),
+                                          decoration: BoxDecoration(
+                                            color: Colors.blue.withOpacity(0.1),
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: const Icon(
+                                            Icons.local_laundry_service,
+                                            color: Colors.blue,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Text(
+                                          harga['layanan'],
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 16,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    Text(
+                                      "Rp ${harga['hargaPerKg']}/Kg",
+                                      style: const TextStyle(
+                                        color: Colors.black87,
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }).toList(),
+                          ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWelcomeCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF42A5F5), Color(0xFF64B5F6)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.blueAccent.withOpacity(0.25),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 32,
+            key: ValueKey(profileImageUrl),
+            backgroundImage: profileImageUrl != null
+                ? NetworkImage(profileImageUrl!)
+                : const AssetImage("assets/images/profile.jpg") as ImageProvider,
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  "Selamat Datang Di Cemerlang Laundry",
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                // Text(
+                //   username.isNotEmpty ? username : "Loading...",
+                //   style: const TextStyle(
+                //     fontSize: 17,
+                //     color: Colors.white,
+                //   ),
+                // ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMenuRow(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        _menuItem(
+          icon: Icons.shopping_bag,
+          label: "Order",
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => OrderScreen(username: username),
+              ),
+            );
+          },
+        ),
+        _menuItem(
+          icon: Icons.list,
+          label: "Daftar Order",
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const OrderListPage()),
+            );
+          },
+        ),
+        _menuItem(
+          icon: Icons.person,
+          label: "Profil",
+          onTap: _openProfilePage,
+        ),
+      ],
+    );
+  }
+
+  Widget _menuItem(
+      {required IconData icon, required String label, required Function onTap}) {
+    return InkWell(
+      onTap: () => onTap(),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.blue.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Icon(icon, size: 30, color: Colors.blue),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDrawer(BuildContext context) {
+  return Drawer(
+    child: Column(
+      children: [
+        // BAGIAN PROFILE DI TENGAH
+        Expanded(
+          child: ListView(
+            padding: EdgeInsets.zero,
             children: [
-              FadeIn(
-                delay: 200,
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [Color(0xFF2196F3), Color(0xFF21CBF3)],
-                    ),
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        "Selamat Datang 👋",
-                        style: TextStyle(
-                          fontSize: 26,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        "Hai $username, yuk kelola pesanan laundry kamu!",
-                        style: const TextStyle(
-                          fontSize: 16,
-                          color: Colors.white70,
-                        ),
-                      ),
-                    ],
-                  ),
+              const SizedBox(height: 50), // spacing atas
+              Center(
+                child: CircleAvatar(
+                  radius: 50,
+                  key: ValueKey(profileImageUrl),
+                  backgroundImage: profileImageUrl != null
+                      ? NetworkImage(profileImageUrl!)
+                      : const AssetImage("assets/images/profile.jpg")
+                          as ImageProvider,
                 ),
               ),
-              const SizedBox(height: 30),
-              FadeIn(
-                delay: 400,
-                child: _menuCard(
-                  icon: Icons.local_laundry_service,
-                  label: "Buat Pesanan Baru",
-                  color: Colors.blueAccent,
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => OrderScreen(username: username),
-                      ),
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(height: 20),
-              FadeIn(
-                delay: 600,
-                child: _menuCard(
-                  icon: Icons.list_alt,
-                  label: "Lihat Daftar Pesanan",
-                  color: Colors.teal,
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const OrderListPage()),
-                    );
-                  },
+              const SizedBox(height: 10),
+              Center(
+                child: Text(
+                  username,
+                  style: const TextStyle(
+                      fontSize: 20, fontWeight: FontWeight.bold),
                 ),
               ),
             ],
           ),
         ),
-      ),
-    );
-  }
 
-  // --- Drawer Sidebar Custom ---
-  Drawer _buildCustomDrawer(BuildContext context) {
-    return Drawer(
-      child: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFF0D47A1), Color(0xFF1976D2)],
-          ),
-        ),
-        child: Column(
+        // BAGIAN LOGOUT DI PUNCAK BAWAH
+        Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 40),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.1),
-                borderRadius: const BorderRadius.only(
-                  bottomRight: Radius.circular(30),
-                ),
-              ),
-              child: Column(
-                children: [
-                  const CircleAvatar(
-                    radius: 45,
-                    backgroundImage: AssetImage('assets/profile.jpg'),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    username,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  const Text(
-                    "User Laundry",
-                    style: TextStyle(color: Colors.white70, fontSize: 14),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 30),
-            Expanded(
-              child: ListView(
-                children: [
-                  DrawerItem(
-                    icon: Icons.person,
-                    label: 'Profil',
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const ProfilePage()),
-                      );
-                    },
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-              child: ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(builder: (_) => const LoginScreen()),
-                  );
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.redAccent,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-                icon: const Icon(Icons.logout, color: Colors.white),
-                label: const Text(
-                  "Logout",
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.logout, color: Colors.red),
+              title:
+                  const Text("Logout", style: TextStyle(color: Colors.red)),
+              onTap: () async {
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.remove("token");
 
-  // --- Card Menu ---
-  Widget _menuCard({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(16),
-      splashColor: color.withOpacity(0.2),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 6,
-              offset: const Offset(0, 3),
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (_) => const LoginScreen()),
+                  (route) => false,
+                );
+              },
             ),
+            const SizedBox(height: 20), // spacing bawah
           ],
         ),
-        child: Row(
-          children: [
-            Icon(icon, color: color, size: 30),
-            const SizedBox(width: 10),
-            Text(
-              label,
-              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+      ],
+    ),
+  );
 }
-
-class DrawerItem extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  const DrawerItem({
-    super.key,
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      leading: Icon(icon, color: Colors.white, size: 26),
-      title: Text(
-        label,
-        style: const TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.w600,
-          fontSize: 16,
-        ),
-      ),
-      onTap: onTap,
-    );
-  }
-}
-
-// --- Animasi Fade ---
-class FadeIn extends StatelessWidget {
-  final Widget child;
-  final int delay;
-
-  const FadeIn({super.key, required this.child, this.delay = 0});
-
-  @override
-  Widget build(BuildContext context) {
-    return TweenAnimationBuilder(
-      tween: Tween<double>(begin: 0, end: 1),
-      duration: const Duration(milliseconds: 700),
-      curve: Curves.easeOut,
-      builder: (context, opacity, _) => Opacity(
-        opacity: opacity,
-        child: Transform.translate(
-          offset: Offset(0, (1 - opacity) * 20),
-          child: child,
-        ),
-      ),
-    );
-  }
 }

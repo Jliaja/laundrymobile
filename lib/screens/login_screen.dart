@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dashboard.dart';
-import 'register.dart'; // 🟢 Tambah ini
+import 'forgot.dart';
+import 'register.dart';
+import 'package:laundry_mobile/config.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -12,11 +14,33 @@ class LoginScreen extends StatefulWidget {
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _LoginScreenState extends State<LoginScreen>
+    with SingleTickerProviderStateMixin {
+  
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   bool _loading = false;
   String? _errorMessage;
+
+  late AnimationController _controller;
+  late Animation<double> _fadeAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+
+    _fadeAnimation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOut,
+    );
+
+    _controller.forward();
+  }
 
   Future<void> _loginApi() async {
     setState(() {
@@ -26,16 +50,13 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       final response = await http.post(
-        Uri.parse("http://192.168.1.2:8000/api/login"),
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-        },
-        body: jsonEncode({
-          "username": _usernameController.text.trim(),
-          "password": _passwordController.text.trim(),
-        }),
-      );
+  Uri.parse("${Config.baseUrl}/api/login"),
+  headers: {"Content-Type": "application/json"},
+  body: jsonEncode({
+    "login": _usernameController.text.trim(), // bisa username atau email
+    "password": _passwordController.text.trim(),
+  }),
+);
 
       final data = jsonDecode(response.body);
       if (response.statusCode == 200 && data["success"] == true) {
@@ -44,10 +65,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(
-            builder: (_) =>
-                DashboardScreen(username: data["user"]["username"] ?? "User"),
-          ),
+          MaterialPageRoute(builder: (_) => const DashboardScreen()),
         );
       } else {
         setState(() {
@@ -56,7 +74,7 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     } catch (e) {
       setState(() {
-        _errorMessage = "Gagal terhubung ke server: $e";
+        _errorMessage = "Gagal terhubung ke server.";
       });
     } finally {
       setState(() {
@@ -67,124 +85,94 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
     const primaryColor = Color(0xFF3498db);
-    const waveColor = Color(0xFFE3F2FD);
+    final size = MediaQuery.of(context).size;
 
     return Scaffold(
       backgroundColor: primaryColor,
-      body: SingleChildScrollView(
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            // Waves
-            Positioned(
-              top: -100,
-              child: CustomPaint(
-                size: Size(size.width * 1.5, 200),
-                painter: WavePainter(waveColor: waveColor, isTop: true),
-              ),
+      body: Stack(
+        children: [
+          // Dekorasi wave
+          Positioned(
+            top: -120,
+            child: CustomPaint(
+              size: Size(size.width * 1.6, 200),
+              painter: WavePainter(waveColor: Colors.white.withOpacity(.3), isTop: true),
             ),
-            Positioned(
-              bottom: -100,
-              child: CustomPaint(
-                size: Size(size.width * 1.5, 200),
-                painter: WavePainter(waveColor: waveColor, isTop: false),
-              ),
+          ),
+          Positioned(
+            bottom: -120,
+            child: CustomPaint(
+              size: Size(size.width * 1.6, 200),
+              painter: WavePainter(waveColor: Colors.white.withOpacity(.3), isTop: false),
             ),
+          ),
 
-            // Content
-            Container(
-              constraints: BoxConstraints(minHeight: size.height),
-              width: size.width,
-              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 80),
+          // Konten
+          SingleChildScrollView(
+            child: FadeTransition(
+              opacity: _fadeAnimation,
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const SizedBox(height: 80),
+                  const SizedBox(height: 120),
+
+                  // Logo (opsional)
+                  Icon(Icons.local_laundry_service,
+                      size: 80, color: Colors.white.withOpacity(.9)),
+                  const SizedBox(height: 15),
                   const Text(
-                    'Login',
+                    "Laundry App",
                     style: TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.bold,
+                      fontSize: 26,
+                      fontWeight: FontWeight.w600,
                       color: Colors.white,
                     ),
                   ),
-                  const SizedBox(height: 30),
+
+                  const SizedBox(height: 40),
+
+                  // Card login
                   Container(
-                    padding: const EdgeInsets.all(20),
+                    margin: const EdgeInsets.symmetric(horizontal: 28),
+                    padding: const EdgeInsets.all(22),
                     decoration: BoxDecoration(
                       color: Colors.white,
-                      borderRadius: BorderRadius.circular(15),
+                      borderRadius: BorderRadius.circular(22),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.15),
-                          blurRadius: 10,
+                          color: Colors.black.withOpacity(.15),
+                          blurRadius: 12,
                           offset: const Offset(0, 5),
                         ),
                       ],
                     ),
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         _buildInputField(
                           controller: _usernameController,
-                          hint: "Masukkan username",
+                          hint: "Username atau email",
                           icon: Icons.person_outline,
                         ),
                         _buildInputField(
                           controller: _passwordController,
-                          hint: "Masukkan password",
+                          hint: "Password",
                           icon: Icons.lock_outline,
                           isPassword: true,
                         ),
-                        if (_errorMessage != null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 10),
-                            child: Text(
-                              _errorMessage!,
-                              style: const TextStyle(color: Colors.red),
-                            ),
-                          ),
-                        const SizedBox(height: 20),
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton(
-                            onPressed: _loading ? null : _loginApi,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: primaryColor,
-                              padding: const EdgeInsets.symmetric(vertical: 15),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                            ),
-                            child: _loading
-                                ? const CircularProgressIndicator(
-                                    color: Colors.white,
-                                  )
-                                : const Text(
-                                    "LOGIN",
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Center(
+
+                        Align(
+                          alignment: Alignment.centerRight,
                           child: GestureDetector(
                             onTap: () {
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
-                                  builder: (_) => const RegisterScreen(),
+                                  builder: (_) => const ForgotPasswordScreen(),
                                 ),
                               );
                             },
                             child: const Text(
-                              "Belum punya akun? Daftar di sini",
+                              "Lupa password?",
                               style: TextStyle(
                                 color: primaryColor,
                                 fontWeight: FontWeight.bold,
@@ -192,14 +180,77 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ),
                         ),
+                        const SizedBox(height: 10),
+
+                        if (_errorMessage != null)
+                          Text(
+                            _errorMessage!,
+                            style: const TextStyle(color: Colors.red),
+                          ),
+
+                        const SizedBox(height: 18),
+
+                        // Tombol
+                        SizedBox(
+                          width: double.infinity,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
+                              gradient: const LinearGradient(
+                                colors: [primaryColor, Color(0xFF1976D2)],
+                              ),
+                            ),
+                            child: ElevatedButton(
+                              onPressed: _loading ? null : _loginApi,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.transparent,
+                                shadowColor: Colors.transparent,
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                              ),
+                              child: _loading
+                                  ? const CircularProgressIndicator(
+                                      color: Colors.white)
+                                  : const Text(
+                                      "LOGIN",
+                                      style: TextStyle(
+                                        fontSize: 17,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white
+                                      ),
+                                    ),
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 15),
+
+                        GestureDetector(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const RegisterScreen(),
+                              ),
+                            );
+                          },
+                          child: const Text(
+                            "Belum punya akun? Daftar di sini",
+                            style: TextStyle(
+                              color: primaryColor,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   ),
+
+                  const SizedBox(height: 40),
                 ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -211,22 +262,21 @@ class _LoginScreenState extends State<LoginScreen> {
     bool isPassword = false,
   }) {
     const primaryColor = Color(0xFF3498db);
+
     return Container(
-      margin: const EdgeInsets.only(bottom: 15),
+      margin: const EdgeInsets.only(bottom: 18),
       child: TextField(
         controller: controller,
         obscureText: isPassword,
         decoration: InputDecoration(
           hintText: hint,
           prefixIcon: Icon(icon, color: primaryColor),
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 15,
-            vertical: 12,
-          ),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: const BorderSide(color: primaryColor, width: 2),
+          filled: true,
+          fillColor: Colors.grey.shade100,
+          contentPadding: const EdgeInsets.symmetric(vertical: 16),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide.none,
           ),
         ),
       ),
@@ -234,7 +284,6 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 }
 
-// 🟢 WavePainter dipakai bersama Register
 class WavePainter extends CustomPainter {
   final Color waveColor;
   final bool isTop;
@@ -247,20 +296,17 @@ class WavePainter extends CustomPainter {
     final path = Path();
 
     path.moveTo(0, isTop ? size.height : 0);
-    double midX = size.width / 2;
-    double endX = size.width;
 
-    if (isTop) {
-      path.quadraticBezierTo(midX, 0, endX, size.height);
-      path.lineTo(endX, 0);
-      path.lineTo(0, 0);
-    } else {
-      path.quadraticBezierTo(midX, size.height, endX, 0);
-      path.lineTo(endX, size.height);
-      path.lineTo(0, size.height);
-    }
+    path.quadraticBezierTo(
+      size.width / 2,
+      isTop ? 0 : size.height,
+      size.width,
+      isTop ? size.height : 0,
+    );
 
-    path.close();
+    path.lineTo(size.width, isTop ? 0 : size.height);
+    path.lineTo(0, isTop ? 0 : size.height);
+
     canvas.drawPath(path, paint);
   }
 
