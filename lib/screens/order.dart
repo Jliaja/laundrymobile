@@ -20,7 +20,13 @@ class _OrderScreenState extends State<OrderScreen> {
   bool isConfirming = false;
   bool loading = false;
 
-  // Pilih tanggal, hanya hari ini
+  // Voucher
+  final TextEditingController voucherController = TextEditingController();
+  Map<String, dynamic>? voucherData;
+  double diskonVoucher = 0;
+  String voucherMessage = '';
+
+  // Pilih tanggal (hanya hari ini)
   Future<void> pilihTanggal(BuildContext context) async {
     final pickedDate = await showDatePicker(
       context: context,
@@ -45,6 +51,71 @@ class _OrderScreenState extends State<OrderScreen> {
     }
   }
 
+  // Cek voucher
+  Future<void> applyVoucher() async {
+    final kode = voucherController.text.trim();
+    if (kode.isEmpty) {
+      setState(() {
+        voucherData = null;
+        diskonVoucher = 0;
+        voucherMessage = '';
+      });
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('token');
+
+    if (token == null || token.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Token tidak ditemukan. Silakan login ulang.")),
+      );
+      return;
+    }
+
+    try {
+      final response = await http.post(
+        Uri.parse("${Config.baseUrl}/api/apply-voucher"),
+        headers: {
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'kode': kode}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() {
+          voucherData = data;
+          diskonVoucher = 0; // akan dihitung nanti saat total
+          if (data['tipe'] == 'persen') {
+            voucherMessage = "Potongan ${data['nilai']}%";
+          } else {
+            voucherMessage = "Potongan Rp${data['nilai']}";
+          }
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Voucher berhasil diterapkan: $voucherMessage")),
+        );
+      } else {
+        setState(() {
+          voucherData = null;
+          diskonVoucher = 0;
+          voucherMessage = '';
+        });
+        final msg = json.decode(response.body)['message'] ?? 'Voucher tidak valid';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(msg)),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Terjadi kesalahan: $e")),
+      );
+    }
+  }
+
   // Buat pesanan
   Future<void> buatPesanan() async {
     if (!_formKey.currentState!.validate()) return;
@@ -66,15 +137,13 @@ class _OrderScreenState extends State<OrderScreen> {
 
       if (token == null || token.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Token tidak ditemukan. Silakan login ulang."),
-          ),
+          const SnackBar(content: Text("Token tidak ditemukan. Silakan login ulang.")),
         );
         setState(() => loading = false);
         return;
       }
 
-      // Ambil profil user untuk nama & alamat
+      // Ambil profil user
       final userResponse = await http.get(
         Uri.parse("${Config.baseUrl}/api/user/profile"),
         headers: {
@@ -85,10 +154,7 @@ class _OrderScreenState extends State<OrderScreen> {
 
       if (userResponse.statusCode != 200) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-                "Gagal mengambil profil: ${userResponse.statusCode}"),
-          ),
+          SnackBar(content: Text("Gagal mengambil profil: ${userResponse.statusCode}")),
         );
         setState(() => loading = false);
         return;
@@ -100,21 +166,34 @@ class _OrderScreenState extends State<OrderScreen> {
 
       if (address == null || address.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text(
-                  "Alamat belum diisi di profil. Silakan isi alamat sebelum membuat pesanan.")),
+          const SnackBar(content: Text("Alamat belum diisi di profil.")),
         );
         setState(() => loading = false);
         return;
       }
 
-      // Body pesanan, tanpa user_id
+      // Hitung total harga default (jumlah = 0, nanti admin update)
+      double totalHarga = 0;
+      double diskon = 0;
+      if (voucherData != null) {
+        if (voucherData!['tipe'] == 'persen') {
+          diskon = totalHarga * (voucherData!['nilai'] / 100);
+        } else {
+          diskon = voucherData!['nilai'].toDouble();
+        }
+        if (diskon > totalHarga) diskon = totalHarga;
+      }
+
       final body = {
-        'nama_pelanggan': namaPelanggan,
-        'layanan': selectedLayanan!,
-        'tanggal': tanggalFormatted,
-        'address': address, // wajib 'address' sesuai API
-      };
+  'nama_pelanggan': namaPelanggan,
+  'layanan': selectedLayanan!,
+  'tanggal': tanggalFormatted,
+  'address': address,
+  'voucher_id': voucherData != null ? voucherData!['voucher_id'] : null,
+  'diskon': diskon,
+  'total_akhir': totalHarga - diskon,
+};
+
 
       final response = await http.post(
         Uri.parse("${Config.baseUrl}/api/pesanan"),
@@ -160,159 +239,95 @@ class _OrderScreenState extends State<OrderScreen> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: primaryColor,
-        title: Text(
-          'Buat Pesanan (${widget.username})',
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
+        title: Text('Buat Pesanan (${widget.username})'),
         centerTitle: true,
       ),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFFE3F2FD), Color(0xFFFFFFFF)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20.0),
-          child: Card(
-            elevation: 5,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16)),
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  children: [
-                    const Text(
-                      "Form Pemesanan Laundry",
-                      style:
-                          TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 20),
-                    DropdownButtonFormField<String>(
-                      value: selectedLayanan,
-                      hint: const Text('Pilih Jenis Layanan'),
-                      onChanged: (value) =>
-                          setState(() => selectedLayanan = value),
-                      items: const [
-                        DropdownMenuItem(
-                            value: 'Cuci Kering', child: Text('Cuci Kering')),
-                        DropdownMenuItem(
-                            value: 'Cuci Setrika',
-                            child: Text('Cuci Setrika')),
-                        DropdownMenuItem(value: 'Setrika', child: Text('Setrika')),
-                      ],
-                      decoration: InputDecoration(
-                        labelText: "Layanan",
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      validator: (value) =>
-                          value == null ? 'Layanan harus dipilih' : null,
-                    ),
-                    const SizedBox(height: 20),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            selectedDate == null
-                                ? 'Belum pilih tanggal'
-                                : 'Tanggal: ${selectedDate!.day}-${selectedDate!.month}-${selectedDate!.year}',
-                            style: const TextStyle(fontSize: 16),
-                          ),
-                        ),
-                        ElevatedButton.icon(
-                          onPressed: () => pilihTanggal(context),
-                          icon: const Icon(Icons.calendar_today),
-                          label: const Text('Pilih Tanggal'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: primaryColor,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 30),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: loading ? null : buatPesanan,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: primaryColor,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: loading
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2.5,
-                                ),
-                              )
-                            : const Text(
-                                'Buat Pesanan',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    if (isConfirming && pesananData != null)
-                      Card(
-                        color: Colors.blue[50],
-                        elevation: 3,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(12.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: const [
-                                  Icon(Icons.receipt_long,
-                                      color: Colors.blue),
-                                  SizedBox(width: 8),
-                                  Text(
-                                    "Pesanan Berhasil",
-                                    style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 16),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                  "Layanan: ${pesananData!['layanan'] ?? selectedLayanan}"),
-                              Text(
-                                  "Status: ${pesananData!['status'] ?? 'pending'}"),
-                              Text(
-                                  "Tanggal: ${pesananData!['tanggal'] ?? selectedDate}"),
-                              if (pesananData!['total_harga'] != null)
-                                Text(
-                                    "Total Harga: Rp ${pesananData!['total_harga']}"),
-                            ],
-                          ),
-                        ),
-                      ),
-                  ],
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            children: [
+              DropdownButtonFormField<String>(
+                value: selectedLayanan,
+                hint: const Text('Pilih Jenis Layanan'),
+                onChanged: (value) => setState(() => selectedLayanan = value),
+                items: const [
+                  DropdownMenuItem(value: 'Cuci Kering', child: Text('Cuci Kering')),
+                  DropdownMenuItem(value: 'Cuci Setrika', child: Text('Cuci Setrika')),
+                  DropdownMenuItem(value: 'Setrika', child: Text('Setrika')),
+                ],
+                decoration: InputDecoration(
+                  labelText: "Layanan",
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                validator: (value) => value == null ? 'Layanan harus dipilih' : null,
+              ),
+              const SizedBox(height: 20),
+              TextFormField(
+                controller: voucherController,
+                decoration: InputDecoration(
+                  labelText: "Kode Voucher (opsional)",
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.check),
+                    onPressed: applyVoucher,
+                  ),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 ),
               ),
-            ),
+              if (voucherMessage.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text("Voucher: $voucherMessage", style: const TextStyle(color: Colors.green)),
+              ],
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      selectedDate == null
+                          ? 'Belum pilih tanggal'
+                          : 'Tanggal: ${selectedDate!.day}-${selectedDate!.month}-${selectedDate!.year}',
+                    ),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: () => pilihTanggal(context),
+                    icon: const Icon(Icons.calendar_today),
+                    label: const Text('Pilih Tanggal'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: loading ? null : buatPesanan,
+                  child: loading
+                      ? const CircularProgressIndicator(color: Colors.white)
+                      : const Text('Buat Pesanan'),
+                ),
+              ),
+              const SizedBox(height: 20),
+              if (isConfirming && pesananData != null)
+                Card(
+                  color: Colors.blue[50],
+                  child: Padding(
+                    padding: const EdgeInsets.all(12.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text("Pesanan Berhasil", style: TextStyle(fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 8),
+                        Text("Layanan: ${pesananData!['data']['layanan']}"),
+                        Text("Tanggal: ${pesananData!['data']['tanggal']}"),
+                        Text("Alamat: ${pesananData!['data']['address']}"),
+                        if (voucherMessage.isNotEmpty) Text("Voucher: $voucherMessage"),
+                        Text("Status: ${pesananData!['data']['status']}"),
+                        
+                      ],
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
       ),

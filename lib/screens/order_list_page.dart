@@ -173,7 +173,7 @@ class _OrderListPageState extends State<OrderListPage>
             // Detail
             _rowItem("Layanan", p['layanan'] ?? "-"),
             _rowItem("Jumlah", "${p['jumlah'] ?? 0} kg"),
-            _rowItem("Harga", formatRupiah(p['total_harga'])),
+            _rowItem("Harga", formatRupiah(p['total_akhir'])),
             _rowItem(
               "Tanggal",
               (p['tanggal'] != null)
